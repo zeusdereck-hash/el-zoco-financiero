@@ -5,16 +5,13 @@ from django.db.models import Sum
 from .models import PerfilUsuario, Zona, Ruta, Cliente, Prestamo, PagoCuota
 
 
-# 1. Inline para ver el histórico de abonos dentro de cada Préstamo
 class PagoCuotaInline(admin.TabularInline):
     model = PagoCuota
     extra = 0
-    readonly_fields = ('fecha_pago',)
     fields = ('monto', 'fecha_pago', 'observacion')
     can_delete = True
 
 
-# 2. Inline para los datos del PerfilUsuario dentro del formulario de Usuario nativo
 class PerfilUsuarioInline(admin.StackedInline):
     model = PerfilUsuario
     can_delete = False
@@ -22,10 +19,10 @@ class PerfilUsuarioInline(admin.StackedInline):
     fk_name = 'usuario'
 
 
-# 3. Personalización del Admin de Usuarios
 class UserAdmin(BaseUserAdmin):
     inlines = (PerfilUsuarioInline,)
-    list_display = ('username', 'email', 'first_name', 'last_name', 'obtener_puesto', 'obtener_zona', 'is_staff')
+    list_display = ('username', 'email', 'first_name', 'last_name',
+                    'obtener_puesto', 'obtener_zona', 'is_staff')
 
     def obtener_puesto(self, instance):
         return instance.perfil.get_puesto_display() if hasattr(instance, 'perfil') else '-'
@@ -38,7 +35,6 @@ class UserAdmin(BaseUserAdmin):
     obtener_zona.short_description = 'Zona'
 
 
-# Re-registrar el modelo de Usuario
 admin.site.unregister(User)
 admin.site.register(User, UserAdmin)
 
@@ -60,6 +56,20 @@ class RutaAdmin(admin.ModelAdmin):
 class ClienteAdmin(admin.ModelAdmin):
     list_display = ('id', 'nombre', 'telefono', 'direccion')
     search_fields = ('nombre', 'telefono')
+    fieldsets = (
+        ('Datos principales', {
+            'fields': ('nombre', 'telefono', 'direccion', 'referencia')
+        }),
+        ('Referencia personal 1', {
+            'fields': ('ref1_nombre', 'ref1_telefono', 'ref1_direccion')
+        }),
+        ('Referencia personal 2', {
+            'fields': ('ref2_nombre', 'ref2_telefono', 'ref2_direccion')
+        }),
+        ('Aval', {
+            'fields': ('aval_nombre', 'aval_telefono', 'aval_direccion')
+        }),
+    )
 
 
 @admin.register(PagoCuota)
@@ -71,22 +81,15 @@ class PagoCuotaAdmin(admin.ModelAdmin):
 @admin.register(Prestamo)
 class PrestamoAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 
-        'cliente', 
-        'capital_prestado', 
-        'monto_total_pagar', 
-        'obtener_saldo_pendiente', 
-        'estado'
+        'id', 'cliente', 'capital_prestado', 'monto_total_pagar',
+        'obtener_saldo_pendiente', 'estado',
     )
     list_filter = ('frecuencia', 'estado', 'ruta')
     search_fields = ('cliente__nombre',)
-
-    # Muestra el histórico de abonos en la parte inferior del Préstamo
     inlines = [PagoCuotaInline]
 
     def obtener_saldo_pendiente(self, obj):
         total_pagado = obj.pagos.aggregate(total=Sum('monto'))['total'] or 0
         saldo = float(obj.monto_total_pagar or 0) - float(total_pagado)
         return f"${max(0.0, round(saldo, 2)):,.2f}"
-    
     obtener_saldo_pendiente.short_description = 'Saldo Restante'

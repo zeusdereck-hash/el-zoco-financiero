@@ -12,14 +12,10 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = PerfilUsuario
         fields = [
-            'puesto', 
-            'puesto_display', 
-            'zona_asignada', 
-            'zona_nombre', 
-            'ruta_asignada', 
-            'ruta_nombre', 
-            'telefono', 
-            'direccion'
+            'puesto', 'puesto_display',
+            'zona_asignada', 'zona_nombre',
+            'ruta_asignada', 'ruta_nombre',
+            'telefono', 'direccion',
         ]
 
 
@@ -44,31 +40,56 @@ class RutaSerializer(serializers.ModelSerializer):
 
 
 class PagoCuotaSerializer(serializers.ModelSerializer):
-    fecha_pago_formateada = serializers.DateTimeField(source='fecha_pago', format="%d/%m/%Y %H:%M", read_only=True)
+    fecha_pago = serializers.DateTimeField(required=False)
+    fecha_pago_formateada = serializers.DateTimeField(
+        source='fecha_pago', format="%d/%m/%Y %H:%M", read_only=True
+    )
 
     class Meta:
         model = PagoCuota
-        fields = '__all__'
+        fields = ['id', 'prestamo', 'monto', 'fecha_pago', 'fecha_pago_formateada', 'observacion']
+        read_only_fields = ['id']
 
 
 class PrestamoSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.ReadOnlyField(source='cliente.nombre')
     cliente_telefono = serializers.ReadOnlyField(source='cliente.telefono')
     cliente_direccion = serializers.ReadOnlyField(source='cliente.direccion')
-    
-    # Ruta y Gestor / Cobrador
+    cliente_referencia = serializers.ReadOnlyField(source='cliente.referencia')
+
+    # Referencias y aval
+    cliente_ref1_nombre = serializers.ReadOnlyField(source='cliente.ref1_nombre')
+    cliente_ref1_telefono = serializers.ReadOnlyField(source='cliente.ref1_telefono')
+    cliente_ref1_direccion = serializers.ReadOnlyField(source='cliente.ref1_direccion')
+    cliente_ref2_nombre = serializers.ReadOnlyField(source='cliente.ref2_nombre')
+    cliente_ref2_telefono = serializers.ReadOnlyField(source='cliente.ref2_telefono')
+    cliente_ref2_direccion = serializers.ReadOnlyField(source='cliente.ref2_direccion')
+    cliente_aval_nombre = serializers.ReadOnlyField(source='cliente.aval_nombre')
+    cliente_aval_telefono = serializers.ReadOnlyField(source='cliente.aval_telefono')
+    cliente_aval_direccion = serializers.ReadOnlyField(source='cliente.aval_direccion')
+
+    # Ruta y Gestor
     ruta_nombre = serializers.ReadOnlyField(source='ruta.nombre')
     gestor_nombre = serializers.SerializerMethodField()
 
-    # Saldo Pendiente Dinámico
+    # Saldo e historial
     saldo_pendiente = serializers.SerializerMethodField()
-
-    # Historial de Pagos Anidado para el Frontend
     historial = PagoCuotaSerializer(source='pagos', many=True, read_only=True)
 
     class Meta:
         model = Prestamo
-        fields = '__all__'
+        fields = [
+            'id', 'cliente', 'cliente_nombre', 'cliente_telefono', 'cliente_direccion',
+            'cliente_referencia',
+            'cliente_ref1_nombre', 'cliente_ref1_telefono', 'cliente_ref1_direccion',
+            'cliente_ref2_nombre', 'cliente_ref2_telefono', 'cliente_ref2_direccion',
+            'cliente_aval_nombre', 'cliente_aval_telefono', 'cliente_aval_direccion',
+            'ruta', 'ruta_nombre', 'gestor_nombre',
+            'capital_prestado', 'porcentaje_interes', 'monto_total_pagar',
+            'monto_cuota', 'numero_cuotas', 'frecuencia', 'fecha_inicio',
+            'orden_visita', 'estado',
+            'saldo_pendiente', 'historial',
+        ]
 
     def get_gestor_nombre(self, obj):
         if obj.ruta and obj.ruta.cobrador:

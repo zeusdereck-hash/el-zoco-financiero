@@ -1,0 +1,54 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <title>Ingresar - El Zoco Financiero</title>
+    <link rel="manifest" href="{% static 'manifest.json' %}">
+    <link rel="apple-touch-icon" href="{% static 'icons/icon-192.png' %}">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex items-center justify-center p-4 font-sans">
+
+    <div class="w-full max-w-sm">
+        <div class="text-center mb-6">
+            <div class="text-5xl mb-2">💰</div>
+            <h1 class="text-2xl font-black text-white">El Zoco Financiero</h1>
+            <p class="text-xs text-slate-400 uppercase tracking-widest">Sistema de Cobranza</p>
+        </div>
+
+        <form method="POST" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            {% csrf_token %}
+
+            {% if error %}
+            <div class="bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs p-3 rounded-xl">
+                ⚠️ {{ error }}
+            </div>
+            {% endif %}
+
+            <div>
+                <label class="block text-xs text-slate-400 mb-1">Usuario</label>
+                <input type="text" name="username" required autofocus
+                       class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-indigo-500">
+            </div>
+
+            <div>
+                <label class="block text-xs text-slate-400 mb-1">Contraseña</label>
+                <input type="password" name="password" required
+                       class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-indigo-500">
+            </div>
+
+            <button type="submit"
+                    class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold py-3 rounded-xl shadow-lg shadow-indigo-600/30 transition">
+                Ingresar
+            </button>
+        </form>
+
+        <p class="text-center text-[10px] text-slate-500 mt-4">
+            Sistema offline. Si pierdes conexión, tu sesión sigue activa.
+        </p>
+    </div>
+</body>
+</html>
