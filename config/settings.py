@@ -74,3 +74,9 @@ STATICFILES_DIRS = [
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True
+# =========================================================
+#  Configuración de autenticación web
+# =========================================================
+LOGIN_URL = '/login/'
+LOGIN_REDIRECT_URL = '/cobro/'
+LOGOUT_REDIRECT_URL = '/login/'

@@ -19,6 +19,36 @@ from .serializers import (
 
 
 # =========================================================
+#  Helper de filtrado por perfil
+# =========================================================
+def filtrar_por_perfil(queryset, user, campo_ruta='ruta', campo_zona='ruta__zona'):
+    """
+    Filtra un queryset según el perfil del usuario logueado.
+    - Sin autenticación → queryset vacío
+    - GERENTE / DISTRITAL / ZONAL → todo
+    - SUPERVISOR → filtra por zona asignada
+    - GESTOR → filtra por ruta asignada
+    """
+    if not user.is_authenticated:
+        return queryset.none()
+
+    perfil = getattr(user, 'perfil', None)
+    if not perfil:
+        return queryset.none()
+
+    if perfil.puesto in ('GERENTE', 'DISTRITAL', 'ZONAL'):
+        return queryset
+
+    if perfil.puesto == 'SUPERVISOR' and perfil.zona_asignada:
+        return queryset.filter(**{campo_zona: perfil.zona_asignada})
+
+    if perfil.puesto == 'GESTOR' and perfil.ruta_asignada:
+        return queryset.filter(**{campo_ruta: perfil.ruta_asignada})
+
+    return queryset.none()
+
+
+# =========================================================
 #  VISTAS WEB (Login, Logout, PWA de cobro)
 # =========================================================
 def login_view(request):
@@ -41,7 +71,26 @@ def logout_view(request):
 
 @login_required
 def cobro_view(request):
-    return render(request, 'prestamos/cobro_offline.html')
+    perfil = getattr(request.user, 'perfil', None)
+
+    # Nombre de la ruta según el rol
+    ruta_nombre = 'Sin ruta asignada'
+    if perfil and perfil.ruta_asignada:
+        ruta_nombre = perfil.ruta_asignada.nombre
+    elif perfil and perfil.zona_asignada:
+        ruta_nombre = f"Zona {perfil.zona_asignada.nombre}"
+    elif perfil and perfil.puesto in ('GERENTE', 'DISTRITAL'):
+        ruta_nombre = 'Todas las rutas'
+
+    gestor_nombre = request.user.get_full_name() or request.user.username
+    puesto_display = perfil.get_puesto_display() if perfil else 'Sin perfil'
+
+    context = {
+        'ruta_nombre': ruta_nombre,
+        'gestor_nombre': gestor_nombre,
+        'puesto_display': puesto_display,
+    }
+    return render(request, 'prestamos/cobro_offline.html', context)
 
 
 # =========================================================
@@ -75,17 +124,47 @@ class LoginAPIView(APIView):
 # =========================================================
 @method_decorator(csrf_exempt, name='dispatch')
 class ClienteViewSet(viewsets.ModelViewSet):
-    queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
     permission_classes = [AllowAny]
-    authentication_classes = []
 
-    @action(detail=False, methods=['post'], permission_classes=[AllowAny], authentication_classes=[])
+    def get_queryset(self):
+        qs = Cliente.objects.all()
+        user = self.request.user
+
+        if not user.is_authenticated:
+            return qs.none()
+
+        perfil = getattr(user, 'perfil', None)
+        if not perfil:
+            return qs.none()
+
+        if perfil.puesto in ('GERENTE', 'DISTRITAL', 'ZONAL'):
+            return qs
+
+        if perfil.puesto == 'SUPERVISOR' and perfil.zona_asignada:
+            return qs.filter(prestamos__ruta__zona=perfil.zona_asignada).distinct()
+
+        if perfil.puesto == 'GESTOR' and perfil.ruta_asignada:
+            return qs.filter(prestamos__ruta=perfil.ruta_asignada).distinct()
+
+        return qs.none()
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def sincronizar_altas(self, request):
         altas_datos = request.data.get('altas', [])
         procesados = []
 
-        ruta_defecto, _ = Ruta.objects.get_or_create(nombre="Ruta Principal")
+        # Determinar la ruta según el gestor logueado
+        ruta_defecto = None
+        if request.user.is_authenticated:
+            perfil = getattr(request.user, 'perfil', None)
+            if perfil and perfil.ruta_asignada:
+                ruta_defecto = perfil.ruta_asignada
+                print(f"✅ Usando ruta del gestor {request.user.username}: {ruta_defecto.nombre}")
+
+        if not ruta_defecto:
+            ruta_defecto, _ = Ruta.objects.get_or_create(nombre="Ruta Principal")
+            print(f"⚠️ Gestor sin ruta asignada, usando: {ruta_defecto.nombre}")
 
         for item in altas_datos:
             try:
@@ -173,12 +252,18 @@ class ClienteViewSet(viewsets.ModelViewSet):
 # =========================================================
 @method_decorator(csrf_exempt, name='dispatch')
 class PagoCuotaViewSet(viewsets.ModelViewSet):
-    queryset = PagoCuota.objects.all()
     serializer_class = PagoCuotaSerializer
     permission_classes = [AllowAny]
-    authentication_classes = []
 
-    @action(detail=False, methods=['post'], permission_classes=[AllowAny], authentication_classes=[])
+    def get_queryset(self):
+        return filtrar_por_perfil(
+            PagoCuota.objects.all(),
+            self.request.user,
+            campo_ruta='prestamo__ruta',
+            campo_zona='prestamo__ruta__zona'
+        )
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def sincronizar_lote(self, request):
         pagos_datos = request.data.get('pagos', [])
         pagos_procesados = []
@@ -204,9 +289,30 @@ class PagoCuotaViewSet(viewsets.ModelViewSet):
 #  RUTAS
 # =========================================================
 class RutaViewSet(viewsets.ModelViewSet):
-    queryset = Ruta.objects.all()
     serializer_class = RutaSerializer
     permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        qs = Ruta.objects.all()
+        user = self.request.user
+
+        if not user.is_authenticated:
+            return qs.none()
+
+        perfil = getattr(user, 'perfil', None)
+        if not perfil:
+            return qs.none()
+
+        if perfil.puesto in ('GERENTE', 'DISTRITAL', 'ZONAL'):
+            return qs
+
+        if perfil.puesto == 'GESTOR' and perfil.ruta_asignada:
+            return qs.filter(id=perfil.ruta_asignada.id)
+
+        if perfil.puesto == 'SUPERVISOR' and perfil.zona_asignada:
+            return qs.filter(zona=perfil.zona_asignada)
+
+        return qs.none()
 
 
 # =========================================================
@@ -217,23 +323,4 @@ class PrestamoViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        qs = Prestamo.objects.all()
-        user = self.request.user
-
-        # Si no está autenticado (modo pruebas/offline), mostramos todo
-        if not user.is_authenticated:
-            return qs
-
-        # Gerente / Distrital / Zonal ven todo
-        try:
-            perfil = user.perfil
-        except Exception:
-            return qs
-
-        if perfil.puesto in ('GERENTE', 'DISTRITAL', 'ZONAL'):
-            return qs
-        if perfil.puesto == 'SUPERVISOR' and perfil.zona_asignada:
-            return qs.filter(ruta__zona=perfil.zona_asignada)
-        if perfil.puesto == 'GESTOR' and perfil.ruta_asignada:
-            return qs.filter(ruta=perfil.ruta_asignada)
-        return qs
+        return filtrar_por_perfil(Prestamo.objects.all(), self.request.user)

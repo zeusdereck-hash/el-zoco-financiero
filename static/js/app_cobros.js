@@ -74,12 +74,23 @@ function cargarFechaEncabezado() {
         badgeFecha.textContent = hoy.toLocaleDateString('es-ES', opciones).toUpperCase();
     }
 }
-
 function actualizarEncabezadoRuta(rutaNombre, gestorNombre) {
     const elemRuta = document.getElementById('header-nombre-ruta');
     const elemGestor = document.getElementById('gestor-nombre-text');
-    if (elemRuta) elemRuta.innerHTML = `<span class="text-indigo-500">📍</span> ${rutaNombre || 'Ruta Principal'}`;
-    if (elemGestor && gestorNombre) elemGestor.textContent = gestorNombre;
+
+    // Si el header fue fijado por el template (Django), no lo tocamos.
+    // El header siempre refleja al usuario logueado, no al listado.
+    if (elemRuta && elemRuta.dataset.fixed === 'true') {
+        return;
+    }
+
+    // Fallback: solo si el template no pudo pintar nada
+    if (elemRuta && rutaNombre) {
+        elemRuta.innerHTML = `<span class="text-indigo-500">📍</span> ${rutaNombre}`;
+    }
+    if (elemGestor && gestorNombre) {
+        elemGestor.textContent = gestorNombre;
+    }
 }
 
 function actualizarEstadoRed() {
@@ -105,9 +116,10 @@ async function descargarDatosServidor() {
     }
 
     try {
-        const response = await fetch('/api/prestamos/');
-        if (!response.ok) throw new Error("Error al consultar la API REST");
-
+    const response = await fetch('/api/prestamos/', {
+        credentials: 'same-origin'
+    });
+    if (!response.ok) throw new Error("Error al consultar la API REST");
         const prestamos = await response.json();
 
         const prestamosMapeados = prestamos.map(p => {
@@ -429,11 +441,12 @@ async function sincronizarTodo() {
                 };
             });
 
-            const resAltas = await fetch('/api/clientes/sincronizar_altas/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-                body: JSON.stringify({ altas: paqueteAltas })
-            });
+const resAltas = await fetch('/api/clientes/sincronizar_altas/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+    body: JSON.stringify({ altas: paqueteAltas }),
+    credentials: 'same-origin'
+});
 
             if (!resAltas.ok) {
                 console.error("Error sincronizando altas:", await resAltas.text());
@@ -481,11 +494,12 @@ async function sincronizarTodo() {
                     fecha_pago: p.fecha_pago
                 }));
 
-                const resPagos = await fetch('/api/pagos/sincronizar_lote/', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-                    body: JSON.stringify({ pagos: paquetePagos })
-                });
+        const resPagos = await fetch('/api/pagos/sincronizar_lote/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ pagos: paquetePagos }),
+    credentials: 'same-origin'
+});
 
                 if (resPagos.ok) {
                     for (let p of pagosListos) await db.pagos_pendientes.delete(p.id);
