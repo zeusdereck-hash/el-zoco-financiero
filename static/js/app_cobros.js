@@ -1,6 +1,6 @@
 // =====================================================================
 //  EL ZOCO FINANCIERO - Motor de Cobranza Offline (PWA)
-//  v2026-09-20c - Corte y Cierre del día
+//  v2026-09-23 - Layout mobile + modal unificado + logo corporativo
 // =====================================================================
 
 // --- 0. UTILIDADES ---
@@ -33,13 +33,12 @@ db.version(5).stores({
 let prestamoSeleccionadoId = null;
 let clienteActualDetalleId = null;
 
-// --- HELPER: fecha YYYY-MM-DD de hoy (para filtrar eventos) ---
+// --- HELPERS ---
 function _hoyKey() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// --- HELPER: registrar evento del día ---
 async function _registrarEvento(tipo, prestamoId, extra = {}) {
     try {
         await db.eventos_dia.add({
@@ -54,7 +53,6 @@ async function _registrarEvento(tipo, prestamoId, extra = {}) {
     }
 }
 
-// --- HELPER: ¿ya existe evento hoy? ---
 async function _existeEvento(tipo, prestamoId) {
     const hoy = _hoyKey();
     const n = await db.eventos_dia.filter(e =>
@@ -65,7 +63,66 @@ async function _existeEvento(tipo, prestamoId) {
     return n > 0;
 }
 
-// --- 2. ENCABEZADOS Y RED ---
+// =====================================================================
+//  MENÚ HAMBURGUESA
+// =====================================================================
+function toggleMenu() {
+    const menu = document.getElementById('menu-dropdown');
+    if (!menu) return;
+    menu.classList.toggle('hidden');
+}
+
+document.addEventListener('click', function(event) {
+    const menu = document.getElementById('menu-dropdown');
+    const header = document.querySelector('header');
+    if (!menu || !header) return;
+    if (!header.contains(event.target)) {
+        menu.classList.add('hidden');
+    }
+});
+
+// =====================================================================
+//  ESTADO DEL BOTÓN SINCRONIZAR (3 estados)
+// =====================================================================
+async function actualizarBotonSync() {
+    const btn = document.getElementById('btn-sincronizar');
+    const badge = document.getElementById('badge-pendientes');
+    if (!btn) return;
+
+    const svg = btn.querySelector('svg');
+    const online = navigator.onLine;
+
+    let pendientes = 0;
+    try {
+        const pagos = await db.pagos_pendientes.count();
+        const clientes = await db.clientes_pendientes.count();
+        pendientes = pagos + clientes;
+    } catch (e) { /* DB no lista aún */ }
+
+    btn.classList.remove('text-emerald-400', 'text-rose-400', 'text-slate-500', 'animate-pulse');
+    if (svg) svg.classList.remove('text-emerald-400', 'text-rose-400', 'text-slate-500');
+
+    if (!online) {
+        btn.classList.add('text-slate-500');
+        if (svg) svg.classList.add('text-slate-500');
+        if (badge) badge.classList.add('hidden');
+    } else if (pendientes > 0) {
+        btn.classList.add('text-rose-400');
+        if (svg) svg.classList.add('text-rose-400');
+        if (badge) {
+            badge.textContent = pendientes > 99 ? '99+' : pendientes;
+            badge.classList.remove('hidden');
+        }
+    } else {
+        btn.classList.add('text-emerald-400');
+        if (svg) svg.classList.add('text-emerald-400');
+        if (badge) badge.classList.add('hidden');
+    }
+}
+
+// =====================================================================
+//  ENCABEZADOS Y RED
+// =====================================================================
 function cargarFechaEncabezado() {
     const badgeFecha = document.getElementById('badge-fecha');
     if (badgeFecha) {
@@ -74,19 +131,17 @@ function cargarFechaEncabezado() {
         badgeFecha.textContent = hoy.toLocaleDateString('es-ES', opciones).toUpperCase();
     }
 }
+
 function actualizarEncabezadoRuta(rutaNombre, gestorNombre) {
     const elemRuta = document.getElementById('header-nombre-ruta');
     const elemGestor = document.getElementById('gestor-nombre-text');
 
-    // Si el header fue fijado por el template (Django), no lo tocamos.
-    // El header siempre refleja al usuario logueado, no al listado.
     if (elemRuta && elemRuta.dataset.fixed === 'true') {
         return;
     }
 
-    // Fallback: solo si el template no pudo pintar nada
     if (elemRuta && rutaNombre) {
-        elemRuta.innerHTML = `<span class="text-indigo-500">📍</span> ${rutaNombre}`;
+        elemRuta.innerHTML = `<span class="text-indigo-500 flex-shrink-0">📍</span><span class="truncate">${rutaNombre}</span>`;
     }
     if (elemGestor && gestorNombre) {
         elemGestor.textContent = gestorNombre;
@@ -105,10 +160,18 @@ function actualizarEstadoRed() {
     }
 }
 
-window.addEventListener('online', actualizarEstadoRed);
-window.addEventListener('offline', actualizarEstadoRed);
+window.addEventListener('online', () => {
+    actualizarEstadoRed();
+    actualizarBotonSync();
+});
+window.addEventListener('offline', () => {
+    actualizarEstadoRed();
+    actualizarBotonSync();
+});
 
-// --- 3. CARGA Y RENDERIZADO ---
+// =====================================================================
+//  CARGA Y RENDERIZADO
+// =====================================================================
 async function descargarDatosServidor() {
     if (!navigator.onLine) {
         alert("Atención: Necesitas conexión a internet para descargar la ruta del día.");
@@ -116,10 +179,10 @@ async function descargarDatosServidor() {
     }
 
     try {
-    const response = await fetch('/api/prestamos/', {
-        credentials: 'same-origin'
-    });
-    if (!response.ok) throw new Error("Error al consultar la API REST");
+        const response = await fetch('/api/prestamos/', {
+            credentials: 'same-origin'
+        });
+        if (!response.ok) throw new Error("Error al consultar la API REST");
         const prestamos = await response.json();
 
         const prestamosMapeados = prestamos.map(p => {
@@ -190,9 +253,8 @@ async function renderizarTarjetas() {
     const contador = document.getElementById('contador-deudas');
     if (contador) contador.textContent = `${prestamos.length} préstamos cargados`;
 
-    await actualizarContadorPendientes();
+    await actualizarBotonSync();
 
-    // Cargar eventos del día para mostrar indicadores
     const hoy = _hoyKey();
     const eventosHoy = await db.eventos_dia.where('fecha_key').equals(hoy).toArray();
     const pagadosHoy = new Set(eventosHoy.filter(e => e.tipo === 'cobro').map(e => String(e.prestamo_id)));
@@ -214,7 +276,6 @@ async function renderizarTarjetas() {
         const yaPago = pagadosHoy.has(String(p.id));
         const yaVisitaSinPago = visitadosSinPagoHoy.has(String(p.id));
 
-        // Indicador de estado del día
         let indicadorHTML = '';
         if (yaPago) {
             indicadorHTML = `<span class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full">✓ PAGÓ HOY</span>`;
@@ -258,7 +319,9 @@ async function renderizarTarjetas() {
     }).join('');
 }
 
-// --- 4. MARCAR "NO PAGÓ" ---
+// =====================================================================
+//  MARCAR "NO PAGÓ"
+// =====================================================================
 async function registrarNoPago(prestamoId, clienteNombre) {
     try {
         const yaVisitado = await _existeEvento('visita', prestamoId);
@@ -266,7 +329,6 @@ async function registrarNoPago(prestamoId, clienteNombre) {
             alert(`${clienteNombre} ya fue marcado como visitado hoy.`);
             return;
         }
-
         await _registrarEvento('visita', prestamoId, { cliente_nombre: clienteNombre });
         await renderizarTarjetas();
     } catch (err) {
@@ -275,7 +337,9 @@ async function registrarNoPago(prestamoId, clienteNombre) {
     }
 }
 
-// --- 5. MODAL DE COBRO ---
+// =====================================================================
+//  MODAL DE COBRO (ticket de abono)
+// =====================================================================
 function abrirModalCobro(id, cliente, cuota) {
     prestamoSeleccionadoId = id;
     document.getElementById('modal-cliente-nombre').textContent = cliente;
@@ -322,7 +386,6 @@ async function _registrarPagoLocal(monto, observacion) {
     });
     await db.prestamos.put(prestamo);
 
-    // Registrar evento de visita + cobro del día
     if (!(await _existeEvento('visita', prestamoId))) {
         await _registrarEvento('visita', prestamoId, { cliente_nombre: prestamo.cliente_nombre });
     }
@@ -341,7 +404,9 @@ async function _despuesDeGuardarPago() {
     if (navigator.onLine) await sincronizarTodo();
 }
 
-// --- 6. BOTONES DE COBRO ---
+// =====================================================================
+//  BOTONES DE COBRO
+// =====================================================================
 async function cobrarYCompartirWhatsApp() {
     const monto = parseFloat(document.getElementById('input-monto-cobro').value);
     const observacion = document.getElementById('input-observacion').value.trim();
@@ -359,11 +424,11 @@ async function cobrarYCompartirWhatsApp() {
 
         if (resultado.modo === 'clipboard') {
             setTimeout(() => {
-                alert("✅ Imagen del ticket copiada al portapapeles.\n\n📌 En WhatsApp Web que se abrió:\n1. Clic en el chat del cliente\n2. Presiona Ctrl + V para pegar la imagen\n3. Envía");
+                alert("✅ Imagen del ticket copiada al portapapeles.\n\n📌 En WhatsApp Web:\n1. Clic en el chat del cliente\n2. Ctrl + V\n3. Envía");
             }, 1200);
         } else if (resultado.modo === 'descarga') {
             setTimeout(() => {
-                alert("✅ Imagen del ticket descargada.\n\n📌 En WhatsApp Web:\n1. Clic en 📎 (adjuntar)\n2. Selecciona la imagen descargada\n3. Envía");
+                alert("✅ Imagen del ticket descargada.\n\n📌 En WhatsApp Web:\n1. Clic en 📎\n2. Selecciona la imagen\n3. Envía");
             }, 1200);
         }
     } catch (err) {
@@ -395,14 +460,9 @@ async function cobrarEImprimir() {
     await _despuesDeGuardarPago();
 }
 
-// --- 7. SINCRONIZACIÓN ---
-async function actualizarContadorPendientes() {
-    const pagos = await db.pagos_pendientes.count();
-    const clientes = await db.clientes_pendientes.count();
-    const countElem = document.getElementById('count-pendientes');
-    if (countElem) countElem.textContent = pagos + clientes;
-}
-
+// =====================================================================
+//  SINCRONIZACIÓN
+// =====================================================================
 async function sincronizarTodo() {
     if (!navigator.onLine) {
         alert("Necesitas conexión a internet para sincronizar con el servidor.");
@@ -412,7 +472,7 @@ async function sincronizarTodo() {
     try {
         const csrfToken = getCookie('csrftoken');
 
-        // FASE 1: Altas de clientes
+        // FASE 1: Altas
         const clientesPendientes = await db.clientes_pendientes.toArray();
         const prestamosPendientes = await db.prestamos_pendientes.toArray();
 
@@ -441,12 +501,12 @@ async function sincronizarTodo() {
                 };
             });
 
-const resAltas = await fetch('/api/clientes/sincronizar_altas/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-    body: JSON.stringify({ altas: paqueteAltas }),
-    credentials: 'same-origin'
-});
+            const resAltas = await fetch('/api/clientes/sincronizar_altas/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ altas: paqueteAltas }),
+                credentials: 'same-origin'
+            });
 
             if (!resAltas.ok) {
                 console.error("Error sincronizando altas:", await resAltas.text());
@@ -465,7 +525,6 @@ const resAltas = await fetch('/api/clientes/sincronizar_altas/', {
                 }
                 await db.prestamos.delete(reg.temp_id);
 
-                // Actualizar eventos relacionados al TEMP_
                 const eventosTEMP = await db.eventos_dia.where('prestamo_id').equals(reg.temp_id).toArray();
                 for (let ev of eventosTEMP) {
                     ev.prestamo_id = String(reg.real_id);
@@ -494,12 +553,12 @@ const resAltas = await fetch('/api/clientes/sincronizar_altas/', {
                     fecha_pago: p.fecha_pago
                 }));
 
-        const resPagos = await fetch('/api/pagos/sincronizar_lote/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-            body: JSON.stringify({ pagos: paquetePagos }),
-    credentials: 'same-origin'
-});
+                const resPagos = await fetch('/api/pagos/sincronizar_lote/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    body: JSON.stringify({ pagos: paquetePagos }),
+                    credentials: 'same-origin'
+                });
 
                 if (resPagos.ok) {
                     for (let p of pagosListos) await db.pagos_pendientes.delete(p.id);
@@ -510,14 +569,16 @@ const resAltas = await fetch('/api/clientes/sincronizar_altas/', {
         }
 
         await descargarDatosServidor();
-        await actualizarContadorPendientes();
+        await actualizarBotonSync();
     } catch (error) {
         console.error("Error en la sincronización:", error);
         alert("Ocurrió un error al intentar sincronizar.");
     }
 }
 
-// --- 8. NUEVO CLIENTE ---
+// =====================================================================
+//  NUEVO CLIENTE
+// =====================================================================
 function abrirModalNuevoCliente() {
     const modal = document.getElementById('modal-nuevo-cliente');
     modal.classList.remove('hidden');
@@ -613,7 +674,6 @@ async function guardarClienteLocal() {
         sincronizado: 0
     });
 
-    // Registrar desembolso del día
     await _registrarEvento('desembolso', `TEMP_${clienteId}`, {
         monto: monto,
         cliente_nombre: nombre
@@ -626,7 +686,9 @@ async function guardarClienteLocal() {
     if (navigator.onLine) await sincronizarTodo();
 }
 
-// --- 9. DETALLE DEL CLIENTE ---
+// =====================================================================
+//  DETALLE DEL CLIENTE
+// =====================================================================
 async function verDetalleCliente(prestamoId) {
     const prestamo = await db.prestamos.get(prestamoId);
     if (!prestamo) return;
@@ -726,101 +788,9 @@ async function procesarRenovacion() {
 }
 
 // =====================================================================
-//  10. CORTE DE CAJA
+//  MODAL DE CIERRE DEL DÍA (unificado)
 // =====================================================================
-
-async function _calcularCorteHoy() {
-    const hoy = _hoyKey();
-    const eventos = await db.eventos_dia.where('fecha_key').equals(hoy).toArray();
-
-    const desembolsos = eventos.filter(e => e.tipo === 'desembolso');
-    const cobros = eventos.filter(e => e.tipo === 'cobro');
-
-    const totalDesembolsado = desembolsos.reduce((s, e) => s + parseFloat(e.monto || 0), 0);
-    const totalCobrado = cobros.reduce((s, e) => s + parseFloat(e.monto || 0), 0);
-    const netoCaja = totalCobrado - totalDesembolsado;
-
-    return {
-        desembolsos,
-        cobros,
-        totalDesembolsado,
-        totalCobrado,
-        netoCaja,
-        cantidadDesembolsos: desembolsos.length,
-        cantidadCobros: cobros.length
-    };
-}
-
-async function abrirModalCorte() {
-    try {
-        const corte = await _calcularCorteHoy();
-
-        const fechaElem = document.getElementById('corte-fecha');
-        if (fechaElem) {
-            fechaElem.textContent = new Date().toLocaleDateString('es-MX', {
-                weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
-            });
-        }
-
-        document.getElementById('corte-count-desembolsos').textContent = corte.cantidadDesembolsos;
-        document.getElementById('corte-count-cobros').textContent = corte.cantidadCobros;
-        document.getElementById('corte-total-desembolsado').textContent = `$${corte.totalDesembolsado.toFixed(2)}`;
-        document.getElementById('corte-total-cobrado').textContent = `$${corte.totalCobrado.toFixed(2)}`;
-        document.getElementById('corte-neto').textContent = `$${corte.netoCaja.toFixed(2)}`;
-
-        // Colorear neto según signo
-        const netoElem = document.getElementById('corte-neto');
-        if (corte.netoCaja >= 0) {
-            netoElem.className = 'font-black text-emerald-400 text-xl';
-        } else {
-            netoElem.className = 'font-black text-rose-400 text-xl';
-        }
-
-        // Lista de desembolsos
-        const lista = document.getElementById('corte-lista-desembolsos');
-        if (corte.desembolsos.length === 0) {
-            lista.innerHTML = `<p class="text-slate-500 italic text-[11px]">Sin desembolsos hoy</p>`;
-        } else {
-            lista.innerHTML = corte.desembolsos.map(d => `
-                <div class="flex justify-between items-center py-1">
-                    <span class="text-slate-300 truncate pr-2">${d.cliente_nombre || 'Cliente'}</span>
-                    <span class="font-bold text-amber-300 whitespace-nowrap">$${parseFloat(d.monto || 0).toFixed(2)}</span>
-                </div>
-            `).join('');
-        }
-
-        const modal = document.getElementById('modal-corte');
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-    } catch (err) {
-        console.error('Error abriendo corte:', err);
-        alert('No se pudo abrir el corte de caja.');
-    }
-}
-
-function cerrarModalCorte() {
-    const modal = document.getElementById('modal-corte');
-    modal.classList.remove('flex');
-    modal.classList.add('hidden');
-}
-
-async function imprimirCorteTicket() {
-    try {
-        const corte = await _calcularCorteHoy();
-        const html = _construirCorteHTML(corte);
-        const jpegUrl = await _renderHtmlToJpeg(html);
-        await _imprimirJpeg(jpegUrl);
-    } catch (err) {
-        console.error('Error imprimiendo corte:', err);
-        alert('No se pudo imprimir el corte.');
-    }
-}
-
-// =====================================================================
-//  11. CIERRE DEL DÍA
-// =====================================================================
-
-async function _calcularCierreHoy() {
+async function _calcularCierreDelDia() {
     const hoy = _hoyKey();
     const eventos = await db.eventos_dia.where('fecha_key').equals(hoy).toArray();
 
@@ -836,26 +806,28 @@ async function _calcularCierreHoy() {
     const sinPago = Math.max(0, visitados - conPago);
     const nuevos = desembolsos.length;
 
+    const totalCobrado = cobros.reduce((s, e) => s + parseFloat(e.monto || 0), 0);
+    const totalDesembolsado = desembolsos.reduce((s, e) => s + parseFloat(e.monto || 0), 0);
+    const netoCaja = totalCobrado - totalDesembolsado;
+
     const todosPrestamos = await db.prestamos.toArray();
     const saldoTotal = todosPrestamos.reduce((s, p) => s + parseFloat(p.saldo_pendiente || 0), 0);
 
     return {
-        visitados,
-        conPago,
-        sinPago,
-        nuevos,
+        visitados, conPago, sinPago, nuevos,
+        totalCobrado, cantidadCobros: cobros.length,
+        totalDesembolsado, cantidadDesembolsos: desembolsos.length,
+        netoCaja,
         totalPrestamos: todosPrestamos.length,
-        saldoTotal,
-        visitas,
-        cobros,
-        desembolsos
+        saldoTotal
     };
 }
 
 async function abrirModalCierre() {
     try {
-        const cierre = await _calcularCierreHoy();
+        const cierre = await _calcularCierreDelDia();
 
+        // Fecha
         const fechaElem = document.getElementById('cierre-fecha');
         if (fechaElem) {
             fechaElem.textContent = new Date().toLocaleDateString('es-MX', {
@@ -863,18 +835,40 @@ async function abrirModalCierre() {
             });
         }
 
+        // Gestor y ruta
+        const gestorElem = document.getElementById('cierre-gestor');
+        const rutaElem = document.getElementById('cierre-ruta');
+        const gestorTexto = document.getElementById('gestor-nombre-text')?.textContent || 'Gestor';
+        const rutaTexto = document.getElementById('header-nombre-ruta')?.textContent?.trim() || 'Sin ruta';
+        if (gestorElem) gestorElem.textContent = gestorTexto;
+        if (rutaElem) rutaElem.textContent = `Ruta: ${rutaTexto}`;
+
+        // Corte de caja
+        document.getElementById('cierre-total-cobrado').textContent = `$${cierre.totalCobrado.toFixed(2)}`;
+        document.getElementById('cierre-count-pagos').textContent = cierre.cantidadCobros;
+        document.getElementById('cierre-total-desembolsado').textContent = `$${cierre.totalDesembolsado.toFixed(2)}`;
+        document.getElementById('cierre-count-desembolsos').textContent = cierre.cantidadDesembolsos;
+
+        const netoElem = document.getElementById('cierre-neto');
+        netoElem.textContent = `$${cierre.netoCaja.toFixed(2)}`;
+        netoElem.className = cierre.netoCaja >= 0
+            ? 'font-black text-emerald-400'
+            : 'font-black text-rose-400';
+
+        // Gestión de ruta
         document.getElementById('cierre-visitados').textContent = cierre.visitados;
         document.getElementById('cierre-con-pago').textContent = cierre.conPago;
         document.getElementById('cierre-sin-pago').textContent = cierre.sinPago;
-        document.getElementById('cierre-nuevos').textContent = cierre.nuevos;
+
+        // Cartera
         document.getElementById('cierre-total-prestamos').textContent = cierre.totalPrestamos;
         document.getElementById('cierre-saldo-total').textContent = `$${cierre.saldoTotal.toFixed(2)}`;
 
-        // Estado de sincronización
+        // Estado de sync
         const pendientes = await db.pagos_pendientes.count();
         const statusElem = document.getElementById('cierre-sync-status');
         if (pendientes === 0) {
-            statusElem.innerHTML = `<div class="flex items-center gap-2 text-emerald-400"><span>✅</span><span>Todos los pagos sincronizados</span></div>`;
+            statusElem.innerHTML = `<div class="flex items-center gap-2 text-emerald-400"><span>✅</span><span class="font-semibold">Todos los pagos sincronizados</span></div>`;
             statusElem.className = 'bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 text-xs';
         } else {
             statusElem.innerHTML = `<div class="flex items-center gap-2 text-amber-400"><span>⚠️</span><span>Quedan <b>${pendientes}</b> pagos sin sincronizar</span></div>`;
@@ -886,32 +880,99 @@ async function abrirModalCierre() {
         modal.classList.add('flex');
     } catch (err) {
         console.error('Error abriendo cierre:', err);
-        alert('No se pudo abrir el cierre del día.');
+        alert('No se pudo abrir el cierre del día: ' + err.message);
     }
 }
 
 function cerrarModalCierre() {
     const modal = document.getElementById('modal-cierre');
-    modal.classList.remove('flex');
-    modal.classList.add('hidden');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
 }
 
-async function imprimirCierreTicket() {
+async function compartirCierreWhatsApp() {
+    const card = document.getElementById('cierre-card');
+    const botones = document.getElementById('cierre-botones');
+
+    // Guardar estilos originales
+    const estilosOriginales = {
+        maxHeight: card.style.maxHeight,
+        overflowY: card.style.overflowY,
+        height: card.style.height
+    };
+
     try {
-        const cierre = await _calcularCierreHoy();
-        const html = _construirCierreHTML(cierre);
-        const jpegUrl = await _renderHtmlToJpeg(html);
-        await _imprimirJpeg(jpegUrl);
+        // 1. Ocultar botones
+        if (botones) botones.style.visibility = 'hidden';
+
+        // 2. ✅ NUEVO: quitar límite de altura temporalmente
+        card.style.maxHeight = 'none';
+        card.style.overflowY = 'visible';
+        card.style.height = 'auto';
+
+        await new Promise(r => setTimeout(r, 150));
+
+        await _cargarHtmlToImage();
+
+        // 3. ✅ NUEVO: medir dimensiones reales
+        const alturaReal = card.scrollHeight;
+        const anchoReal = card.scrollWidth;
+
+        const jpegUrl = await htmlToImage.toJpeg(card, {
+            quality: 0.95,
+            backgroundColor: '#1e293b',
+            pixelRatio: 2,
+            width: anchoReal,
+            height: alturaReal,
+            style: {
+                transform: 'none',
+                margin: '0',
+                maxHeight: 'none',
+                overflow: 'visible'
+            }
+        });
+
+        // 4. Restaurar estilos
+        card.style.maxHeight = estilosOriginales.maxHeight;
+        card.style.overflowY = estilosOriginales.overflowY;
+        card.style.height = estilosOriginales.height;
+        if (botones) botones.style.visibility = 'visible';
+        
+        const gestorTexto = document.getElementById('gestor-nombre-text')?.textContent || 'Gestor';
+        const fecha = new Date().toLocaleString('es-MX', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+        const textoFallback =
+            `*EL ZOCO FINANCIERO*\n` +
+            `*CIERRE DEL DÍA*\n` +
+            `Gestor: ${gestorTexto}\n` +
+            `Fecha: ${fecha}\n`;
+
+        const resultado = await _compartirJpegWhatsApp(jpegUrl, textoFallback, '');
+
+        if (resultado.modo === 'clipboard') {
+            setTimeout(() => {
+                alert("✅ Imagen del cierre copiada al portapapeles.\n\n📌 En WhatsApp Web:\n1. Elige el chat\n2. Ctrl + V\n3. Envía");
+            }, 1200);
+        } else if (resultado.modo === 'descarga') {
+            setTimeout(() => {
+                alert("✅ Imagen del cierre descargada.\n\n📌 En WhatsApp Web:\n1. Clic en 📎\n2. Selecciona la imagen\n3. Envía");
+            }, 1200);
+        }
     } catch (err) {
-        console.error('Error imprimiendo cierre:', err);
-        alert('No se pudo imprimir el cierre.');
+        console.error('Error compartiendo cierre:', err);
+        alert('No se pudo compartir el cierre: ' + err.message);
+        const botones = document.getElementById('cierre-botones');
+        if (botones) botones.style.visibility = 'visible';
     }
 }
 
 // =====================================================================
-//  12. SISTEMA DE TICKETS (HTML → JPEG)
+//  SISTEMA DE TICKETS DE ABONO (HTML → JPEG)
 // =====================================================================
-
 let _htmlToImagePromise = null;
 function _cargarHtmlToImage() {
     if (_htmlToImagePromise) return _htmlToImagePromise;
@@ -929,12 +990,11 @@ function _cargarHtmlToImage() {
     return _htmlToImagePromise;
 }
 
-// --- ESTILOS COMUNES PARA TODOS LOS TICKETS ---
 function _estilosTicket() {
     return `
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            width: 48mm;
+            width: 52mm;
             padding: 2mm;
             font-family: 'Courier New', Courier, monospace;
             font-size: 10px;
@@ -942,20 +1002,29 @@ function _estilosTicket() {
             color: #000;
             background: #fff;
         }
-        table { width: 100%; border-collapse: collapse; }
-        td { padding: 2px 0; vertical-align: top; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        td {
+            padding: 2px 0;
+            vertical-align: top;
+            overflow: hidden;
+            word-wrap: break-word;
+        }
         .center { text-align: center; }
         .bold { font-weight: bold; }
         .right { text-align: right; }
         .logo { width: 26mm; margin-bottom: 4px; }
         .divider { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
         .small { font-size: 9px; }
-        .big { font-size: 12px; }
+        .big { font-size: 11px; }
+        .nowrap { white-space: nowrap; }
         p { padding: 1px 0; }
     `;
 }
 
-// --- HEADER COMÚN ---
 function _headerTicket() {
     const logoUrl = `${window.location.origin}/static/icons/logo.png`;
     return `
@@ -969,7 +1038,6 @@ function _headerTicket() {
     `;
 }
 
-// --- DATOS DEL TICKET DE COBRO ---
 function _generarDatosTicket(prestamo, monto, observacion, fechaPago) {
     const fecha = fechaPago ? new Date(fechaPago) : new Date();
     const folio = `T-${prestamo.id}-${fecha.getTime().toString().slice(-6)}`;
@@ -1026,7 +1094,6 @@ function _construirTextoWhatsApp(d) {
     );
 }
 
-// --- TICKET DE COBRO ---
 function _construirTicketHTML(d) {
     return `<!DOCTYPE html>
 <html>
@@ -1050,14 +1117,14 @@ function _construirTicketHTML(d) {
 
         <table>
             <tr class="bold small">
-                <td style="width: 22%;">CANT</td>
-                <td style="width: 48%;">DESC</td>
-                <td class="right" style="width: 30%;">SUBT</td>
+                <td style="width: 20%;">CANT</td>
+                <td style="width: 45%;">DESC</td>
+                <td class="right" style="width: 35%;">SUBT</td>
             </tr>
             <tr>
                 <td>1</td>
                 <td>ABONO A DEUDA</td>
-                <td class="right">$${d.monto}</td>
+                <td class="right nowrap">$${d.monto}</td>
             </tr>
         </table>
 
@@ -1065,16 +1132,16 @@ function _construirTicketHTML(d) {
 
         <table>
             <tr>
-                <td style="width: 60%;">Deuda Original:</td>
-                <td class="right" style="width: 40%;">$${d.montoTotalOriginal}</td>
+                <td class="nowrap" style="width: 60%;">Deuda Original:</td>
+                <td class="right nowrap" style="width: 40%;">$${d.montoTotalOriginal}</td>
             </tr>
             <tr>
-                <td>Total Abonado:</td>
-                <td class="right">$${d.totalPagado}</td>
+                <td class="nowrap">Total Abonado:</td>
+                <td class="right nowrap">$${d.totalPagado}</td>
             </tr>
             <tr class="bold">
-                <td>SU ABONO:</td>
-                <td class="right">$${d.monto}</td>
+                <td class="nowrap">SU ABONO:</td>
+                <td class="right nowrap">$${d.monto}</td>
             </tr>
         </table>
 
@@ -1082,9 +1149,9 @@ function _construirTicketHTML(d) {
 
         <table>
             <tr class="bold big">
-                <td style="width: 60%;">SALDO RESTANTE:</td>
-                <td class="right" style="width: 40%;">$${d.saldoDespues}</td>
-            </tr>
+                <td class="nowrap" style="width: 68%;">SALDO RESTANTE:</td>
+                <td class="right nowrap" style="width: 32%;">$${d.saldoDespues}</td>
+            </tr> 
         </table>
 
         <hr class="divider">
@@ -1098,309 +1165,11 @@ function _construirTicketHTML(d) {
 </html>`;
 }
 
-// --- TICKET DE CORTE DE CAJA ---
-function _construirCorteHTML(corte) {
-    const fecha = new Date().toLocaleString('es-MX', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-    });
-    const gestor = document.getElementById('gestor-nombre-text')?.textContent || 'Gestor';
-
-    const filasDesembolsos = corte.desembolsos.length === 0
-        ? `<tr><td colspan="2" style="text-align:center; font-style:italic; color:#666;">Sin desembolsos hoy</td></tr>`
-        : corte.desembolsos.map(d => `
-            <tr>
-                <td style="width: 60%;">${(d.cliente_nombre || '').substring(0, 18)}</td>
-                <td class="right" style="width: 40%;">$${parseFloat(d.monto || 0).toFixed(2)}</td>
-            </tr>
-        `).join('');
-
-    const netoFmt = corte.netoCaja.toFixed(2);
-
-    return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>${_estilosTicket()}</style>
-</head>
-<body>
-    <div id="ticket-root">
-        ${_headerTicket()}
-
-        <hr class="divider">
-
-        <div class="center bold" style="font-size: 11px;">CORTE DE CAJA</div>
-        <p class="center" style="font-size: 9px;">${fecha}</p>
-        <p><span class="bold">COBRADOR:</span> ${gestor.toUpperCase()}</p>
-
-        <hr class="divider">
-
-        <p class="bold">DESEMBOLSOS DEL DÍA</p>
-        <table>
-            <tr class="bold small">
-                <td style="width: 60%;">Cliente</td>
-                <td class="right" style="width: 40%;">Monto</td>
-            </tr>
-            ${filasDesembolsos}
-        </table>
-        <table>
-            <tr class="bold">
-                <td style="width: 60%;">Total (${corte.cantidadDesembolsos}):</td>
-                <td class="right" style="width: 40%;">$${corte.totalDesembolsado.toFixed(2)}</td>
-            </tr>
-        </table>
-
-        <hr class="divider">
-
-        <p class="bold">COBRANZA DEL DÍA</p>
-        <table>
-            <tr>
-                <td style="width: 60%;">Pagos registrados:</td>
-                <td class="right" style="width: 40%;">${corte.cantidadCobros}</td>
-            </tr>
-            <tr class="bold">
-                <td>Total cobrado:</td>
-                <td class="right">$${corte.totalCobrado.toFixed(2)}</td>
-            </tr>
-        </table>
-
-        <hr class="divider">
-
-        <p class="bold">RESUMEN</p>
-        <table>
-            <tr>
-                <td style="width: 60%;">(+) Cobranza:</td>
-                <td class="right" style="width: 40%;">$${corte.totalCobrado.toFixed(2)}</td>
-            </tr>
-            <tr>
-                <td>(-) Desembolsos:</td>
-                <td class="right">-$${corte.totalDesembolsado.toFixed(2)}</td>
-            </tr>
-            <tr>
-                <td colspan="2"><hr class="divider"></td>
-            </tr>
-            <tr class="bold big">
-                <td>NETO EN CAJA:</td>
-                <td class="right">$${netoFmt}</td>
-            </tr>
-        </table>
-
-        <hr class="divider">
-
-        <div class="center" style="font-size: 8px; margin-top: 4px;">
-            <p class="bold">Atendió: ${gestor.toUpperCase()}</p>
-            <p style="font-style: italic;">Documento interno de corte de caja.</p>
-        </div>
-    </div>
-</body>
-</html>`;
-}
-
-// --- TICKET DE CIERRE DEL DÍA ---
-function _construirCierreHTML(cierre) {
-    const fecha = new Date().toLocaleString('es-MX', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-    });
-    const gestor = document.getElementById('gestor-nombre-text')?.textContent || 'Gestor';
-
-    return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>${_estilosTicket()}</style>
-</head>
-<body>
-    <div id="ticket-root">
-        ${_headerTicket()}
-
-        <hr class="divider">
-
-        <div class="center bold" style="font-size: 11px;">CIERRE DEL DÍA</div>
-        <p class="center" style="font-size: 9px;">${fecha}</p>
-        <p><span class="bold">COBRADOR:</span> ${gestor.toUpperCase()}</p>
-
-        <hr class="divider">
-
-        <p class="bold">GESTIÓN DE RUTA</p>
-        <table>
-            <tr>
-                <td style="width: 65%;">Clientes visitados:</td>
-                <td class="right" style="width: 35%;">${cierre.visitados}</td>
-            </tr>
-            <tr>
-                <td style="padding-left: 3mm;">• Con pago:</td>
-                <td class="right">${cierre.conPago}</td>
-            </tr>
-            <tr>
-                <td style="padding-left: 3mm;">• Sin pago:</td>
-                <td class="right">${cierre.sinPago}</td>
-            </tr>
-            <tr class="bold">
-                <td>Clientes nuevos:</td>
-                <td class="right">${cierre.nuevos}</td>
-            </tr>
-        </table>
-
-        <hr class="divider">
-
-        <p class="bold">ESTADO DE CARTERA</p>
-        <table>
-            <tr>
-                <td style="width: 65%;">Préstamos en ruta:</td>
-                <td class="right" style="width: 35%;">${cierre.totalPrestamos}</td>
-            </tr>
-            <tr class="bold">
-                <td>Saldo por cobrar:</td>
-                <td class="right">$${cierre.saldoTotal.toFixed(2)}</td>
-            </tr>
-        </table>
-
-        <hr class="divider">
-
-        <div class="center" style="font-size: 8px; margin-top: 4px;">
-            <p class="bold">Atendió: ${gestor.toUpperCase()}</p>
-            <p style="font-style: italic;">Documento interno de cierre operativo.</p>
-            <p style="margin-top: 6px;">Firma: ______________________</p>
-        </div>
-    </div>
-</body>
-</html>`;
-}
-async function compartirCorteWhatsApp() {
-    try {
-        const corte = await _calcularCorteHoy();
-        const html = _construirCorteHTML(corte);
-        const jpegUrl = await _renderHtmlToJpeg(html);
-        const textoFallback = _construirTextoCorte(corte);
-
-        const resultado = await _compartirJpegWhatsApp(jpegUrl, textoFallback, '');
-
-        if (resultado.modo === 'clipboard') {
-            setTimeout(() => {
-                alert(
-                    "✅ Imagen del CORTE copiada al portapapeles.\n\n" +
-                    "📌 En WhatsApp Web que se abrió:\n" +
-                    "1. Elige el chat a quien enviar (grupo de supervisión o tu jefe)\n" +
-                    "2. Presiona Ctrl + V\n" +
-                    "3. Envía"
-                );
-            }, 1200);
-        } else if (resultado.modo === 'descarga') {
-            setTimeout(() => {
-                alert(
-                    "✅ Imagen del CORTE descargada.\n\n" +
-                    "📌 En WhatsApp Web:\n" +
-                    "1. Clic en 📎 (adjuntar)\n" +
-                    "2. Selecciona la imagen descargada\n" +
-                    "3. Envía"
-                );
-            }, 1200);
-        } else if (resultado.modo === 'cancelado') {
-            // El usuario canceló el share nativo, no hacemos nada
-        }
-    } catch (err) {
-        console.error('Error compartiendo corte:', err);
-        alert('No se pudo generar la imagen del corte.');
-    }
-}
-
-async function compartirCierreWhatsApp() {
-    try {
-        const cierre = await _calcularCierreHoy();
-        const html = _construirCierreHTML(cierre);
-        const jpegUrl = await _renderHtmlToJpeg(html);
-        const textoFallback = _construirTextoCierre(cierre);
-
-        const resultado = await _compartirJpegWhatsApp(jpegUrl, textoFallback, '');
-
-        if (resultado.modo === 'clipboard') {
-            setTimeout(() => {
-                alert(
-                    "✅ Imagen del CIERRE copiada al portapapeles.\n\n" +
-                    "📌 En WhatsApp Web que se abrió:\n" +
-                    "1. Elige el chat a quien enviar\n" +
-                    "2. Presiona Ctrl + V\n" +
-                    "3. Envía"
-                );
-            }, 1200);
-        } else if (resultado.modo === 'descarga') {
-            setTimeout(() => {
-                alert(
-                    "✅ Imagen del CIERRE descargada.\n\n" +
-                    "📌 En WhatsApp Web:\n" +
-                    "1. Clic en 📎 (adjuntar)\n" +
-                    "2. Selecciona la imagen descargada\n" +
-                    "3. Envía"
-                );
-            }, 1200);
-        }
-    } catch (err) {
-        console.error('Error compartiendo cierre:', err);
-        alert('No se pudo generar la imagen del cierre.');
-    }
-}
-
-// --- TEXTO FALLBACK POR SI NO SE PUEDE ADJUNTAR IMAGEN ---
-function _construirTextoCorte(corte) {
-    const fecha = new Date().toLocaleString('es-MX', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-    });
-    const gestor = document.getElementById('gestor-nombre-text')?.textContent || 'Gestor';
-
-    return (
-        `*EL ZOCO FINANCIERO*\n` +
-        `*CORTE DE CAJA*\n` +
-        `--------------------------------\n` +
-        `Fecha: ${fecha}\n` +
-        `Cobrador: ${gestor}\n` +
-        `--------------------------------\n` +
-        `💸 *DESEMBOLSOS* (${corte.cantidadDesembolsos})\n` +
-        corte.desembolsos.map(d =>
-            `• ${d.cliente_nombre || 'Cliente'}: $${parseFloat(d.monto || 0).toFixed(2)}`
-        ).join('\n') + '\n' +
-        `Total desembolsado: $${corte.totalDesembolsado.toFixed(2)}\n` +
-        `--------------------------------\n` +
-        `💰 *COBRANZA* (${corte.cantidadCobros} pagos)\n` +
-        `Total cobrado: $${corte.totalCobrado.toFixed(2)}\n` +
-        `--------------------------------\n` +
-        `*NETO EN CAJA: $${corte.netoCaja.toFixed(2)}*`
-    );
-}
-
-function _construirTextoCierre(cierre) {
-    const fecha = new Date().toLocaleString('es-MX', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-    });
-    const gestor = document.getElementById('gestor-nombre-text')?.textContent || 'Gestor';
-
-    return (
-        `*EL ZOCO FINANCIERO*\n` +
-        `*CIERRE DEL DÍA*\n` +
-        `--------------------------------\n` +
-        `Fecha: ${fecha}\n` +
-        `Cobrador: ${gestor}\n` +
-        `--------------------------------\n` +
-        `🗺️ *GESTIÓN DE RUTA*\n` +
-        `Visitados: ${cierre.visitados}\n` +
-        `• Con pago: ${cierre.conPago}\n` +
-        `• Sin pago: ${cierre.sinPago}\n` +
-        `Nuevos créditos: ${cierre.nuevos}\n` +
-        `--------------------------------\n` +
-        `📁 *CARTERA*\n` +
-        `Préstamos en ruta: ${cierre.totalPrestamos}\n` +
-        `Saldo por cobrar: $${cierre.saldoTotal.toFixed(2)}`
-    );
-}
-
-// --- RENDER HTML → JPEG ---
 async function _renderHtmlToJpeg(htmlCompleto) {
     await _cargarHtmlToImage();
 
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:60mm; height:500mm; border:0;';
+iframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:70mm; height:2000px; border:0;';
     document.body.appendChild(iframe);
 
     const idoc = iframe.contentDocument || iframe.contentWindow.document;
@@ -1425,13 +1194,30 @@ async function _renderHtmlToJpeg(htmlCompleto) {
         throw new Error('No se encontró #ticket-root en el HTML del ticket');
     }
 
+    // ✅ NUEVO: medir la altura real del contenido
+    const alturaReal = contenedor.scrollHeight;
+    const anchoReal = contenedor.scrollWidth;
+
+    // Ajustar el iframe para que no corte
+    iframe.style.height = (alturaReal + 50) + 'px';
+
+    await new Promise(r => setTimeout(r, 150));
+
     let jpegDataUrl;
     try {
         jpegDataUrl = await htmlToImage.toJpeg(contenedor, {
             quality: 0.95,
             backgroundColor: '#ffffff',
             pixelRatio: 2,
-            skipFonts: false
+            skipFonts: false,
+            // ✅ NUEVO: forzar las dimensiones reales
+            width: anchoReal,
+            height: alturaReal,
+            style: {
+                transform: 'none',
+                margin: '0',
+                padding: '0'
+            }
         });
     } finally {
         if (iframe.parentNode) document.body.removeChild(iframe);
@@ -1444,7 +1230,6 @@ async function _generarTicketJpeg(d) {
     return _renderHtmlToJpeg(_construirTicketHTML(d));
 }
 
-// --- IMPRIMIR JPEG EN TÉRMICA ---
 async function _imprimirJpeg(jpegDataUrl) {
     const iframe = document.createElement('iframe');
     iframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:58mm; height:300mm; border:0;';
@@ -1489,7 +1274,6 @@ async function _imprimirJpeg(jpegDataUrl) {
     }, 30000);
 }
 
-// --- JPEG → PNG Blob ---
 async function _jpegAPngBlob(jpegDataUrl) {
     return new Promise((resolve, reject) => {
         const img = new Image();
@@ -1508,7 +1292,6 @@ async function _jpegAPngBlob(jpegDataUrl) {
     });
 }
 
-// --- COMPARTIR POR WHATSAPP ---
 async function _compartirJpegWhatsApp(jpegDataUrl, textoFallback, telefono) {
     const resp = await fetch(jpegDataUrl);
     const jpegBlob = await resp.blob();
@@ -1519,7 +1302,7 @@ async function _compartirJpegWhatsApp(jpegDataUrl, textoFallback, telefono) {
         try {
             await navigator.share({
                 files: [file],
-                title: 'Comprobante de Pago - El Zoco',
+                title: 'Comprobante - El Zoco',
                 text: textoFallback
             });
             return { ok: true, modo: 'share-nativo' };
@@ -1565,7 +1348,6 @@ async function _compartirJpegWhatsApp(jpegDataUrl, textoFallback, telefono) {
     return { ok: true, modo: 'descarga' };
 }
 
-// --- REIMPRIMIR DESDE HISTORIAL ---
 async function reimprimirTicket(indexHistorial) {
     if (!clienteActualDetalleId) return;
 
@@ -1619,25 +1401,17 @@ async function reimprimirTicket(indexHistorial) {
     }
 }
 
-// --- INICIALIZACIÓN ---
+// =====================================================================
+//  INICIALIZACIÓN
+// =====================================================================
 document.addEventListener('DOMContentLoaded', async () => {
     cargarFechaEncabezado();
     actualizarEstadoRed();
+    await actualizarBotonSync();
 
     if (navigator.onLine) {
         await descargarDatosServidor();
     } else {
         await renderizarTarjetas();
     }
-
-    const btnSync = document.getElementById('btn-sincronizar');
-    if (btnSync) btnSync.addEventListener('click', sincronizarTodo);
 });
-
-// Service Worker - se activará en Fase 3
-// if ('serviceWorker' in navigator) {
-//     window.addEventListener('load', () => {
-//         navigator.serviceWorker.register('/static/js/sw.js')
-//             .catch(err => console.warn('SW no registrado:', err));
-//     });
-// }
