@@ -461,11 +461,23 @@ async function cobrarEImprimir() {
 }
 
 // =====================================================================
+//  SINCRONIZACIÓN MANUAL (con feedback al usuario)
+// =====================================================================
+async function sincronizarManual() {
+    if (!navigator.onLine) {
+        alert("📴 Sin conexión.\n\nLos datos se sincronizarán automáticamente cuando recuperes internet.");
+        return;
+    }
+    await sincronizarTodo();
+}
+
+// =====================================================================
 //  SINCRONIZACIÓN
 // =====================================================================
 async function sincronizarTodo() {
+    // Si no hay conexión, salir en silencio (sin alerta)
     if (!navigator.onLine) {
-        alert("Necesitas conexión a internet para sincronizar con el servidor.");
+        console.log('[Sync] Sin conexión — cancelado en silencio');
         return;
     }
 
@@ -570,9 +582,21 @@ async function sincronizarTodo() {
 
         await descargarDatosServidor();
         await actualizarBotonSync();
-    } catch (error) {
-        console.error("Error en la sincronización:", error);
-        alert("Ocurrió un error al intentar sincronizar.");
+        } catch (error) {
+        // Silenciar errores de red (offline esperado)
+        const esErrorDeRed = (
+            error.message?.includes('Failed to fetch') ||
+            error.message?.includes('NetworkError') ||
+            error.message?.includes('network') ||
+            !navigator.onLine
+        );
+
+        if (esErrorDeRed) {
+            console.log('[Sync] Sin conexión — silenciado');
+        } else {
+            console.error("Error en la sincronización:", error);
+            alert("Ocurrió un error al intentar sincronizar.");
+        }
     }
 }
 
@@ -993,9 +1017,12 @@ function _cargarHtmlToImage() {
 function _estilosTicket() {
     return `
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            background: #fff;
+        }
         body {
             width: 72mm;
-            padding: 2mm;
+            padding: 6mm 4mm;
             font-family: 'Courier New', Courier, monospace;
             font-size: 10px;
             line-height: 1.5;
@@ -1230,7 +1257,7 @@ async function _renderHtmlToJpeg(htmlCompleto) {
     await _cargarHtmlToImage();
 
 const iframe = document.createElement('iframe');
-iframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:80mm; height:2000px; border:0;';
+iframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:82mm; height:2000px; border:0;';
     document.body.appendChild(iframe);
 
     const idoc = iframe.contentDocument || iframe.contentWindow.document;
