@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ClienteViewSet, RutaViewSet, PrestamoViewSet,
     PagoCuotaViewSet, LoginAPIView,
-    login_view, logout_view, cobro_view,
+    login_view, logout_view, cobro_view, sw_view,
 )
 from django.views.generic import RedirectView
 
@@ -15,6 +15,7 @@ router.register(r'pagos', PagoCuotaViewSet, basename='pago')
 
 urlpatterns = [
     path('', RedirectView.as_view(url='/login/', permanent=False)),
+    path('sw.js', sw_view, name='service_worker'),
     path('login/', login_view, name='login'),
     path('logout/', logout_view, name='logout'),
     path('cobro/', cobro_view, name='cobro_offline'),

@@ -731,9 +731,9 @@ async function verDetalleCliente(prestamoId) {
                         <span class="text-[10px] text-slate-400 block">${fecha}</span>
                         ${obs}
                     </div>
-                    <button type="button" onclick="reimprimirTicket(${idx})"
-                            class="px-2 py-1 text-[10px] rounded font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/30 transition whitespace-nowrap">
-                        🖨️ Reimprimir
+                                        <button type="button" onclick="reimprimirTicket(${idx})"
+                            class="px-2 py-1 text-[10px] rounded font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30 transition whitespace-nowrap">
+                        📱 Compartir
                     </button>
                 </div>
             `;
@@ -994,11 +994,11 @@ function _estilosTicket() {
     return `
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            width: 52mm;
+            width: 72mm;
             padding: 2mm;
             font-family: 'Courier New', Courier, monospace;
             font-size: 10px;
-            line-height: 1.6;
+            line-height: 1.5;
             color: #000;
             background: #fff;
         }
@@ -1016,11 +1016,12 @@ function _estilosTicket() {
         .center { text-align: center; }
         .bold { font-weight: bold; }
         .right { text-align: right; }
-        .logo { width: 26mm; margin-bottom: 4px; }
+        .logo { width: 28mm; margin-bottom: 4px; }
         .divider { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
         .small { font-size: 9px; }
         .big { font-size: 11px; }
         .nowrap { white-space: nowrap; }
+        .hist-head { border-bottom: 1px solid #000; }
         p { padding: 1px 0; }
     `;
 }
@@ -1049,6 +1050,39 @@ function _generarDatosTicket(prestamo, monto, observacion, fechaPago) {
     const numeroPago = (prestamo.historial || []).length;
     const totalPagos = prestamo.numero_cuotas || 24;
 
+    // Historial completo (del más antiguo al más reciente) con numeración de cuota
+        // Historial completo (del más antiguo al más reciente)
+    const totalHistorial = (prestamo.historial || []).length;
+    const historialFormateado = (prestamo.historial || [])
+        .slice()
+        .map((h, idx) => {
+            // Extraer timestamp de forma defensiva
+            let ts = 0;
+            if (h.fecha_pago) {
+                const t = new Date(h.fecha_pago).getTime();
+                ts = isNaN(t) ? 0 : t;
+            }
+            return { ...h, _ts: ts, _idx: idx };
+        })
+        .sort((a, b) => {
+            if (a._ts !== b._ts) return a._ts - b._ts;
+            return a._idx - b._idx;
+        })
+        .map((h, idx) => {
+            const f = h.fecha_pago ? new Date(h.fecha_pago) : null;
+            return {
+                numero: idx + 1,
+                fecha: f
+                    ? f.toLocaleDateString('es-MX', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: '2-digit'
+                    })
+                    : '--/--/--',
+                monto: parseFloat(h.monto || 0).toFixed(2)
+            };
+        });
+
     return {
         folio,
         fecha: fecha.toLocaleString('es-MX', {
@@ -1068,7 +1102,9 @@ function _generarDatosTicket(prestamo, monto, observacion, fechaPago) {
         numeroPago,
         totalPagos,
         observacion: observacion || '',
-        gestor: document.getElementById('gestor-nombre-text')?.textContent || 'Gestor'
+        gestor: document.getElementById('gestor-nombre-text')?.textContent || 'Gestor',
+        historial: historialFormateado,
+        totalHistorial
     };
 }
 
@@ -1115,7 +1151,7 @@ function _construirTicketHTML(d) {
 
         <hr class="divider">
 
-        <table>
+                <table>
             <tr class="bold small">
                 <td style="width: 20%;">CANT</td>
                 <td style="width: 45%;">DESC</td>
@@ -1127,6 +1163,31 @@ function _construirTicketHTML(d) {
                 <td class="right nowrap">$${d.monto}</td>
             </tr>
         </table>
+
+        ${d.historial && d.historial.length > 0 ? `
+        <hr class="divider">
+
+        <div class="center bold small" style="margin-bottom: 3px;">HISTORIAL DE PAGOS</div>
+
+        <table>
+            <tr class="bold small hist-head">
+                <td style="width: 20%;">#</td>
+                <td style="width: 40%;">FECHA</td>
+                <td class="right" style="width: 40%;">MONTO</td>
+            </tr>
+            ${d.historial.map(h => `
+                <tr>
+                    <td class="nowrap">${h.numero}</td>
+                    <td class="nowrap">${h.fecha}</td>
+                    <td class="right nowrap">$${h.monto}</td>
+                </tr>
+            `).join('')}
+        </table>
+
+        <div class="small" style="margin-top: 3px;">
+            <b>Total pagos:</b> ${d.totalHistorial}
+        </div>
+        ` : ''}
 
         <hr class="divider">
 
@@ -1168,8 +1229,8 @@ function _construirTicketHTML(d) {
 async function _renderHtmlToJpeg(htmlCompleto) {
     await _cargarHtmlToImage();
 
-    const iframe = document.createElement('iframe');
-iframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:70mm; height:2000px; border:0;';
+const iframe = document.createElement('iframe');
+iframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:80mm; height:2000px; border:0;';
     document.body.appendChild(iframe);
 
     const idoc = iframe.contentDocument || iframe.contentWindow.document;
@@ -1357,20 +1418,47 @@ async function reimprimirTicket(indexHistorial) {
     const h = prestamo.historial[indexHistorial];
     if (!h) { alert("No se encontró el pago."); return; }
 
-    const pagosPosteriores = (prestamo.historial || []).slice(0, indexHistorial);
-    const montoPosterior = pagosPosteriores.reduce((s, x) => s + parseFloat(x.monto || 0), 0);
-
-    const saldoDespues = parseFloat(prestamo.saldo_pendiente || 0) + montoPosterior;
-    const saldoAntes = saldoDespues + parseFloat(h.monto || 0);
-
-    const totalPagadoAlMomento = (prestamo.historial || [])
-        .slice(indexHistorial)
+        // Opción B: totales actuales (estado de cuenta)
+    const totalPagadoActual = (prestamo.historial || [])
         .reduce((s, x) => s + parseFloat(x.monto || 0), 0);
 
-    const numeroPago = (prestamo.historial || []).length - indexHistorial;
+    const saldoActual = parseFloat(prestamo.saldo_pendiente || 0);
+    const numeroPagoActual = (prestamo.historial || []).length;
+        const fecha = new Date(h.fecha_pago || Date.now());
 
-    const fecha = new Date(h.fecha_pago || Date.now());
-    const datos = {
+    // Historial hasta el momento de ese pago (inclusive)
+    const historialHastaElPago = (prestamo.historial || []).slice(indexHistorial);
+        const totalHistorial = (prestamo.historial || []).length;
+    const historialFormateado = (prestamo.historial || [])
+        .slice()
+        .map((hh, idx) => {
+            let ts = 0;
+            if (hh.fecha_pago) {
+                const t = new Date(hh.fecha_pago).getTime();
+                ts = isNaN(t) ? 0 : t;
+            }
+            return { ...hh, _ts: ts, _idx: idx };
+        })
+        .sort((a, b) => {
+            if (a._ts !== b._ts) return a._ts - b._ts;
+            return a._idx - b._idx;
+        })
+        .map((hh, idx) => {
+            const f = hh.fecha_pago ? new Date(hh.fecha_pago) : null;
+            return {
+                numero: idx + 1,
+                fecha: f
+                    ? f.toLocaleDateString('es-MX', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: '2-digit'
+                    })
+                    : '--/--/--',
+                monto: parseFloat(hh.monto || 0).toFixed(2)
+            };
+        });
+
+        const datos = {
         folio: `T-${prestamo.id}-${fecha.getTime().toString().slice(-6)}`,
         fecha: fecha.toLocaleString('es-MX', {
             day: '2-digit', month: '2-digit', year: 'numeric',
@@ -1380,24 +1468,37 @@ async function reimprimirTicket(indexHistorial) {
         telefono: prestamo.cliente_telefono || '',
         direccion: prestamo.cliente_direccion || '',
         monto: parseFloat(h.monto || 0).toFixed(2),
-        saldoAntes: saldoAntes.toFixed(2),
-        saldoDespues: saldoDespues.toFixed(2),
+        saldoAntes: (saldoActual + parseFloat(h.monto || 0)).toFixed(2),
+        saldoDespues: saldoActual.toFixed(2),
         montoTotalOriginal: parseFloat(prestamo.monto_total_pagar || 0).toFixed(2),
-        totalPagado: totalPagadoAlMomento.toFixed(2),
+        totalPagado: totalPagadoActual.toFixed(2),
         cuota: parseFloat(prestamo.monto_cuota || 0).toFixed(2),
         frecuencia: prestamo.frecuencia || 'DIARIO',
-        numeroPago,
+        numeroPago: numeroPagoActual,
         totalPagos: prestamo.numero_cuotas || 24,
         observacion: h.observacion || '',
-        gestor: document.getElementById('gestor-nombre-text')?.textContent || 'Gestor'
+        gestor: document.getElementById('gestor-nombre-text')?.textContent || 'Gestor',
+        historial: historialFormateado,
+        totalHistorial
     };
 
-    try {
+        try {
         const jpegUrl = await _generarTicketJpeg(datos);
-        await _imprimirJpeg(jpegUrl);
+        const textoFallback = _construirTextoWhatsApp(datos);
+        const resultado = await _compartirJpegWhatsApp(jpegUrl, textoFallback, prestamo.cliente_telefono);
+
+        if (resultado.modo === 'clipboard') {
+            setTimeout(() => {
+                alert("✅ Imagen del ticket copiada al portapapeles.\n\n📌 En WhatsApp Web:\n1. Clic en el chat del cliente\n2. Ctrl + V\n3. Envía");
+            }, 1200);
+        } else if (resultado.modo === 'descarga') {
+            setTimeout(() => {
+                alert("✅ Imagen del ticket descargada.\n\n📌 En WhatsApp Web:\n1. Clic en 📎\n2. Selecciona la imagen\n3. Envía");
+            }, 1200);
+        }
     } catch (err) {
         console.error('Error al reimprimir:', err);
-        alert('No se pudo generar el ticket para reimprimir.');
+        alert('No se pudo generar el ticket para compartir.');
     }
 }
 
@@ -1415,3 +1516,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         await renderizarTarjetas();
     }
 });
+// =====================================================================
+//  SERVICE WORKER
+// =====================================================================
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then((reg) => {
+                console.log('✅ Service Worker registrado. Scope:', reg.scope);
+            })
+            .catch((err) => {
+                console.warn('⚠️ SW no registrado:', err);
+            });
+    });
+}

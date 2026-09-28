@@ -324,3 +324,27 @@ class PrestamoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return filtrar_por_perfil(Prestamo.objects.all(), self.request.user)
+
+        # =========================================================
+#  SERVICE WORKER (servido desde la raíz con scope global)
+# =========================================================
+from django.http import HttpResponse
+from django.conf import settings
+import os
+
+
+def sw_view(request):
+    """
+    Sirve el archivo sw.js desde la raíz con el header
+    Service-Worker-Allowed para permitir scope global.
+    """
+    sw_path = os.path.join(settings.BASE_DIR, 'static', 'js', 'sw.js')
+    try:
+        with open(sw_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        response = HttpResponse(content, content_type='application/javascript')
+        response['Service-Worker-Allowed'] = '/'
+        response['Cache-Control'] = 'no-cache'
+        return response
+    except FileNotFoundError:
+        return HttpResponse('// sw.js no encontrado', content_type='application/javascript', status=404)
