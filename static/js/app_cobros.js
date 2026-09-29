@@ -172,9 +172,13 @@ window.addEventListener('offline', () => {
 // =====================================================================
 //  CARGA Y RENDERIZADO
 // =====================================================================
-async function descargarDatosServidor() {
+async function descargarDatosServidor(opciones = {}) {
+    const { silencioso = false } = opciones;
+
     if (!navigator.onLine) {
-        alert("Atención: Necesitas conexión a internet para descargar la ruta del día.");
+        if (!silencioso) {
+            alert("Atención: Necesitas conexión a internet para descargar la ruta del día.");
+        }
         return;
     }
 
@@ -234,9 +238,22 @@ async function descargarDatosServidor() {
         });
 
         await renderizarTarjetas();
-    } catch (error) {
-        console.error("Error descargando datos del servidor:", error);
-        alert("Error al conectar con el servidor para descargar la ruta.");
+        } catch (error) {
+        const esErrorDeRed = (
+            error.message?.includes('Failed to fetch') ||
+            error.message?.includes('NetworkError') ||
+            error.message?.includes('network') ||
+            !navigator.onLine
+        );
+
+        if (esErrorDeRed) {
+            console.log('[Download] Error de red silenciado');
+        } else {
+            console.error("Error descargando datos del servidor:", error);
+            if (!silencioso) {
+                alert("Error al conectar con el servidor para descargar la ruta.");
+            }
+        }
     }
 }
 
@@ -580,7 +597,7 @@ async function sincronizarTodo() {
             }
         }
 
-        await descargarDatosServidor();
+        await descargarDatosServidor({ silencioso: true });
         await actualizarBotonSync();
         } catch (error) {
         // Silenciar errores de red (offline esperado)
@@ -1022,12 +1039,21 @@ function _estilosTicket() {
         }
         body {
             width: 72mm;
-            padding: 6mm 4mm;
             font-family: 'Courier New', Courier, monospace;
             font-size: 10px;
             line-height: 1.5;
             color: #000;
             background: #fff;
+        }
+        #ticket-root {
+            width: 72mm;
+            padding: 6mm 4mm;
+            background: #fff;
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: inherit;
+            line-height: inherit;
+            color: inherit;
         }
         table {
             width: 100%;
@@ -1293,18 +1319,17 @@ iframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:82mm; height:
 
     let jpegDataUrl;
     try {
-        jpegDataUrl = await htmlToImage.toJpeg(contenedor, {
+                jpegDataUrl = await htmlToImage.toJpeg(contenedor, {
             quality: 0.95,
             backgroundColor: '#ffffff',
             pixelRatio: 2,
             skipFonts: false,
-            // ✅ NUEVO: forzar las dimensiones reales
             width: anchoReal,
             height: alturaReal,
             style: {
                 transform: 'none',
-                margin: '0',
-                padding: '0'
+                margin: '0'
+                // ✅ Sin padding: '0' → respeta el padding del body
             }
         });
     } finally {
@@ -1538,7 +1563,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await actualizarBotonSync();
 
     if (navigator.onLine) {
-        await descargarDatosServidor();
+        // Silencioso: si falla la red al arrancar, no molestar al gestor
+        await descargarDatosServidor({ silencioso: true });
     } else {
         await renderizarTarjetas();
     }
